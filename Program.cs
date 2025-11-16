@@ -1,7 +1,5 @@
 ﻿using OpenQA.Selenium.Chrome;
 using OpenQA.Selenium;
-using OpenQA.Selenium.Support.UI;
-using System;
 using Lab5CPP;
 
 class Program
