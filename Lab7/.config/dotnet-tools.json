@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "isRoot": true,
+  "tools": {
+    "testreporter.specflow.tool": {
+      "version": "2.4.1",
+      "commands": [
+        "test-reporter"
+      ]
+    }
+  }
+}
+
+
