@@ -16,12 +16,6 @@ namespace Lab7.Steps
         private IWebDriver? _driver;
         private readonly ScenarioContext _scenarioContext;
 
-        static GoogleSearchSteps()
-        {
-            // Initialize report once for all scenarios
-            ReportManager.InitializeReport();
-        }
-
         public GoogleSearchSteps(ScenarioContext scenarioContext)
         {
             _scenarioContext = scenarioContext;

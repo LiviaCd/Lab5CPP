@@ -4,6 +4,8 @@ using WebDriverManager;
 using WebDriverManager.DriverConfigs.Impl;
 using TechTalk.SpecFlow;
 using Lab7.Base;
+using Allure.Net.Commons;
+using System.Text;
 
 namespace Lab7.Hooks
 {
@@ -14,15 +16,57 @@ namespace Lab7.Hooks
     public class SpecFlowHooks
     {
         private readonly ScenarioContext _scenarioContext;
+        private readonly FeatureContext _featureContext;
+        private static string? _currentAllureTestUuid;
 
-        public SpecFlowHooks(ScenarioContext scenarioContext)
+        public SpecFlowHooks(ScenarioContext scenarioContext, FeatureContext featureContext)
         {
             _scenarioContext = scenarioContext;
+            _featureContext = featureContext;
+        }
+
+        [BeforeTestRun]
+        public static void BeforeTestRun()
+        {
+            // Initialize report before any scenarios run
+            ReportManager.InitializeReport();
+            
+            // Ensure allure-results directory exists
+            var allureResultsDir = Path.Combine(Directory.GetCurrentDirectory(), "allure-results");
+            if (!Directory.Exists(allureResultsDir))
+            {
+                Directory.CreateDirectory(allureResultsDir);
+            }
         }
 
         [BeforeScenario(Order = 0)]
         public void BeforeScenario()
         {
+            // Initialize Allure test result
+            _currentAllureTestUuid = Guid.NewGuid().ToString();
+            var scenarioTitle = _scenarioContext.ScenarioInfo.Title;
+            var scenarioDescription = _scenarioContext.ScenarioInfo.Description;
+            var featureTitle = _featureContext.FeatureInfo.Title;
+            
+            AllureLifecycle.Instance.StartTestCase(new TestResult
+            {
+                uuid = _currentAllureTestUuid,
+                name = scenarioTitle,
+                description = string.IsNullOrEmpty(scenarioDescription) ? scenarioTitle : scenarioDescription,
+                fullName = $"{featureTitle}::{scenarioTitle}",
+                historyId = _currentAllureTestUuid,
+                labels = new List<Label>
+                {
+                    Label.Feature(featureTitle),
+                    Label.Suite("SpecFlow Tests"),
+                    Label.TestClass("GoogleSearchTests")
+                },
+                start = DateTimeOffset.Now.ToUnixTimeMilliseconds()
+            });
+
+            // Store Allure UUID in scenario context
+            _scenarioContext.Set(_currentAllureTestUuid, "AllureTestUuid");
+
             // Automatically download and setup ChromeDriver matching installed Chrome version
             new DriverManager().SetUpDriver(new ChromeConfig());
 
@@ -71,8 +115,7 @@ namespace Lab7.Hooks
             _scenarioContext.Set<IWebDriver>(driver, "WebDriver");
 
             // Initialize test case for reporting
-            var scenarioTitle = _scenarioContext.ScenarioInfo.Title;
-            ReportManager.CreateTest(scenarioTitle, _scenarioContext.ScenarioInfo.Description);
+            ReportManager.CreateTest(scenarioTitle, scenarioDescription);
         }
 
         [AfterScenario]
@@ -83,6 +126,64 @@ namespace Lab7.Hooks
             // Complete test case reporting
             var scenarioStatus = _scenarioContext.ScenarioExecutionStatus == ScenarioExecutionStatus.OK ? "Pass" : "Fail";
             ReportManager.CompleteTestCase(scenarioStatus);
+            
+            // Complete Allure test result
+            var allureUuid = _scenarioContext.ContainsKey("AllureTestUuid") 
+                ? _scenarioContext.Get<string>("AllureTestUuid") 
+                : _currentAllureTestUuid;
+            
+            if (!string.IsNullOrEmpty(allureUuid))
+            {
+                try
+                {
+                    // Reactivate the test context by starting the test case with the same UUID
+                    // This ensures the context is active for UpdateTestCase
+                    var scenarioTitle = _scenarioContext.ScenarioInfo.Title;
+                    var scenarioDescription = _scenarioContext.ScenarioInfo.Description;
+                    var featureTitle = _featureContext.FeatureInfo.Title;
+                    
+                    // Start test case again to activate context
+                    AllureLifecycle.Instance.StartTestCase(new TestResult
+                    {
+                        uuid = allureUuid,
+                        name = scenarioTitle,
+                        description = string.IsNullOrEmpty(scenarioDescription) ? scenarioTitle : scenarioDescription,
+                        fullName = $"{featureTitle}::{scenarioTitle}",
+                        historyId = allureUuid,
+                        labels = new List<Label>
+                        {
+                            Label.Feature(featureTitle),
+                            Label.Suite("SpecFlow Tests"),
+                            Label.TestClass("GoogleSearchTests")
+                        }
+                    });
+                    
+                    // Now update the test result with final status
+                    AllureLifecycle.Instance.UpdateTestCase(testResult =>
+                    {
+                        testResult.status = _scenarioContext.ScenarioExecutionStatus == ScenarioExecutionStatus.OK 
+                            ? Status.passed 
+                            : Status.failed;
+                        testResult.statusDetails = _scenarioContext.ScenarioExecutionStatus == ScenarioExecutionStatus.OK
+                            ? null
+                            : new StatusDetails
+                            {
+                                message = "Test scenario failed",
+                                trace = _scenarioContext.TestError?.ToString() ?? "Unknown error"
+                            };
+                        testResult.stop = DateTimeOffset.Now.ToUnixTimeMilliseconds();
+                    });
+                    
+                    // Stop and write the test case
+                    AllureLifecycle.Instance.StopTestCase();
+                    AllureLifecycle.Instance.WriteTestCase();
+                }
+                catch (Exception ex)
+                {
+                    // If Allure operations fail, log but don't break the test
+                    Console.WriteLine($"[WARN] Could not complete Allure test result: {ex.Message}");
+                }
+            }
             
             // Cleanup WebDriver
             driver?.Quit();
